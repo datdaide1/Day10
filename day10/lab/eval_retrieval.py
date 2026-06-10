@@ -69,6 +69,7 @@ def main() -> int:
         "question_id",
         "question",
         "top1_doc_id",
+        "top1_chunk_id",
         "top1_preview",
         "contains_expected",
         "hits_forbidden",
@@ -83,7 +84,9 @@ def main() -> int:
             res = col.query(query_texts=[text], n_results=args.top_k)
             docs = (res.get("documents") or [[]])[0]
             metas = (res.get("metadatas") or [[]])[0]
+            chunk_ids = (res.get("ids") or [[]])[0]
             top_doc = (metas[0] or {}).get("doc_id", "") if metas else ""
+            top_chunk_id = chunk_ids[0] if chunk_ids else ""
             preview = (docs[0] or "")[:180].replace("\n", " ") if docs else ""
             blob = " ".join(docs).lower()
             must_any = [x.lower() for x in q.get("must_contain_any", [])]
@@ -99,6 +102,7 @@ def main() -> int:
                     "question_id": q.get("id", ""),
                     "question": text,
                     "top1_doc_id": top_doc,
+                    "top1_chunk_id": top_chunk_id,
                     "top1_preview": preview,
                     "contains_expected": "yes" if ok_any else "no",
                     "hits_forbidden": "yes" if bad_forb else "no",

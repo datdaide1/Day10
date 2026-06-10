@@ -65,6 +65,8 @@ def main() -> int:
             forbidden = [x.lower() for x in q.get("must_not_contain", [])]
             ok_any = any(m in blob for m in must_any) if must_any else True
             bad_forb = any(m in blob for m in forbidden) if forbidden else False
+            chunk_ids = (res.get("ids") or [[]])[0]
+            top_chunk_id = chunk_ids[0] if chunk_ids else ""
             top_doc = (metas[0] or {}).get("doc_id", "") if metas else ""
             want_top1 = (q.get("expect_top1_doc_id") or "").strip()
             top1_ok = True
@@ -74,6 +76,7 @@ def main() -> int:
                 "id": q.get("id"),
                 "question": text,
                 "top1_doc_id": top_doc,
+                "top1_chunk_id": top_chunk_id,
                 "contains_expected": ok_any,
                 "hits_forbidden": bad_forb,
                 "top1_doc_matches": top1_ok if want_top1 else None,

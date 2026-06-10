@@ -27,6 +27,7 @@ from dotenv import load_dotenv
 
 from monitoring.freshness_check import check_manifest_freshness
 from quality.expectations import run_expectations
+from quality.schema_validator import validate_with_pydantic
 from transform.cleaning_rules import clean_rows, load_raw_csv, write_cleaned_csv, write_quarantine_csv
 
 load_dotenv()
@@ -61,9 +62,12 @@ def cmd_run(args: argparse.Namespace) -> int:
         print(msg)
         _log(log_path, msg)
 
+    # Boundary 1: ingest_at — ngay khi bắt đầu đọc file raw
+    ingest_at = datetime.now(timezone.utc)
     rows = load_raw_csv(raw_path)
     raw_count = len(rows)
     log(f"run_id={run_id}")
+    log(f"ingest_at={ingest_at.isoformat()}")
     log(f"raw_records={raw_count}")
 
     cleaned, quarantine = clean_rows(
@@ -84,6 +88,18 @@ def cmd_run(args: argparse.Namespace) -> int:
     for r in results:
         sym = "OK" if r.passed else "FAIL"
         log(f"expectation[{r.name}] {sym} ({r.severity}) :: {r.detail}")
+
+    # Pydantic schema validation — Bonus +2 / Distinction (a)
+    pydantic_results, pydantic_errors = validate_with_pydantic(cleaned)
+    for r in pydantic_results:
+        sym = "OK" if r.passed else "FAIL"
+        log(f"expectation[{r.name}] {sym} ({r.severity}) :: {r.detail}")
+    if pydantic_errors:
+        for err in pydantic_errors[:3]:  # log tối đa 3 lỗi đầu
+            log(f"pydantic_error row={err['row_index']} doc_id={err['doc_id']} errors={err['pydantic_errors']}")
+    pydantic_halt = any(not r.passed and r.severity == "halt" for r in pydantic_results)
+    halt = halt or pydantic_halt
+
     if halt and not args.skip_validate:
         log("PIPELINE_HALT: expectation suite failed (halt).")
         return 2
@@ -99,13 +115,23 @@ def cmd_run(args: argparse.Namespace) -> int:
     if not embed_ok:
         return 3
 
+    # Boundary 2: publish_at — sau khi embed xong (snapshot publish)
+    publish_at = datetime.now(timezone.utc)
+    pipeline_lag_seconds = (publish_at - ingest_at).total_seconds()
+    log(f"publish_at={publish_at.isoformat()}")
+    log(f"pipeline_lag_seconds={pipeline_lag_seconds:.1f}")
+
     latest_exported = ""
     if cleaned:
         latest_exported = max((r.get("exported_at") or "" for r in cleaned), default="")
 
     manifest = {
         "run_id": run_id,
-        "run_timestamp": datetime.now(timezone.utc).isoformat(),
+        # Freshness 2 boundaries — Bonus +1 / Distinction (b)
+        "ingest_at": ingest_at.isoformat(),
+        "publish_at": publish_at.isoformat(),
+        "pipeline_lag_seconds": round(pipeline_lag_seconds, 1),
+        "run_timestamp": publish_at.isoformat(),
         "raw_path": str(raw_path.relative_to(ROOT)),
         "raw_records": raw_count,
         "cleaned_records": len(cleaned),
@@ -116,6 +142,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         "cleaned_csv": str(cleaned_path.relative_to(ROOT)),
         "chroma_path": os.environ.get("CHROMA_DB_PATH", "./chroma_db"),
         "chroma_collection": os.environ.get("CHROMA_COLLECTION", "day10_kb"),
+        "pydantic_schema_violations": len(pydantic_errors),
     }
     man_path = MAN_DIR / f"manifest_{run_id.replace(':', '-')}.json"
     man_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")

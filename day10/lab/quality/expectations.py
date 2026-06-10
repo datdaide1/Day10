@@ -112,5 +112,39 @@ def run_expectations(cleaned_rows: List[Dict[str, Any]]) -> Tuple[List[Expectati
         )
     )
 
+    # E7: allowed_doc_ids_only (severity: halt)
+    from transform.cleaning_rules import ALLOWED_DOC_IDS
+    bad_doc_ids = [
+        r
+        for r in cleaned_rows
+        if r.get("doc_id") not in ALLOWED_DOC_IDS
+    ]
+    ok7 = len(bad_doc_ids) == 0
+    results.append(
+        ExpectationResult(
+            "allowed_doc_ids_only",
+            ok7,
+            "halt",
+            f"invalid_docs={len(bad_doc_ids)}",
+        )
+    )
+
+    # E8: chunk_text_no_noise_prefix (severity: warn)
+    bad_noise = [
+        r
+        for r in cleaned_rows
+        if (r.get("chunk_text") or "").strip().startswith("!!!")
+        or (r.get("chunk_text") or "").strip().lower().startswith("nội dung không rõ ràng:")
+    ]
+    ok8 = len(bad_noise) == 0
+    results.append(
+        ExpectationResult(
+            "chunk_text_no_noise_prefix",
+            ok8,
+            "warn",
+            f"noise_chunks={len(bad_noise)}",
+        )
+    )
+
     halt = any(not r.passed and r.severity == "halt" for r in results)
     return results, halt
